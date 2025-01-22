@@ -20,8 +20,8 @@ btc_price_sum_111 = pi_model_sum_min.calc_btc_price_sum_in_period()
 mayer_model_sum = model.BTCCalculationProcess(mayer_model_days)
 btc_price_sum_200 = mayer_model_sum.calc_btc_price_sum_in_period()
 
-escape_flag_pi_model = model.CalcPIModelResult(btc_price_sum_111, btc_price_sum_350)
-# escape_flag_mayer_model = model.CalcMayerModelResult(btc_price_sum_200)
+#escape_flag_pi_model = model.CalcPIModelResult(btc_price_sum_111, btc_price_sum_350)
+escape_flag_mayer_model = model.CalcMayerModelResult(btc_price_sum_200)
 
-print(escape_flag_pi_model)
-# print(escape_flag_mayer_model)
+# print(escape_flag_pi_model)
+print(escape_flag_mayer_model)

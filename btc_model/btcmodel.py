@@ -1,6 +1,5 @@
 import pandas as pd
 import json
-import okx.api.account as Account
 import okx.MarketData as MarketData
 
 ## API initialize
@@ -17,7 +16,7 @@ one_day_in_ms = 86400000
 flag = "0"                                        # 实盘:0 , 模拟盘:1
 marketDataAPI = MarketData.MarketAPI(
     api_key=apikey, api_secret_key=secretkey, passphrase=passphrase, flag=flag)
-# btc_price = marketDataAPI.get_index_tickers(instId="BTC-USD")
+btc_price = marketDataAPI.get_index_tickers(instId="BTC-USD")
 
 def CalcPIModelResult(btc_price_sum_111, btc_price_sum_350):
     current_111_average = btc_price_sum_111 / 111
