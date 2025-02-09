@@ -1,0 +1,9 @@
+numpy
+pandas
+requests
+pyarrow
+tqdm
+# 如果 pip install ta-lib 安装失败，可以尝试：
+# 1. mac操作系统先运行 brew install ta-lab 后，再运行 pip install ta-lib
+# 2. windows操作系统可以直接下载whl文件安装
+ta-lib

@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 """
 Author: guozq
 
@@ -73,17 +72,6 @@ class GlassnodeApiWrapper(object):
 
         return data
 
-    def get_sth_mvrv_zsccore_data(self, start_dt, end_dt):
-        params = {
-            'startday': start_dt,
-            'endday': end_dt
-        }
-
-        data = self.get_data('mvrv-zscore', params)
-        data.columns = ['date', 'timestamp', 'mvrv_zscore']
-        data[['mvrv_zscore']] = data[['mvrv_zscore']].astype(float)
-
-        return data
 
 if __name__ == "__main__":
     from btc_model.setting.setting import get_settings

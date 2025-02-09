@@ -1,300 +1,235 @@
-# -*- coding: utf-8 -*
 import pandas as pd
-from tqdm import tqdm
-from time import sleep
-import requests, time, hmac, hashlib, json, os
-from urllib.parse import urlencode
+from typing import Union, List, Any, Optional, Coroutine, Callable, Tuple, Iterable
 
-recv_window = 5000
-data_path = os.getcwd() + "/data/data.json"
+from binance.client import Client
+from binance.enums import HistoricalKlinesType
+
+from btc_model.core.common.const import Interval, Exchange, InstrumentType, Product
+from btc_model.core.common.object import Instrument
 
 
 class BinanceApiWrapper(object):
-    BASE_URL = "https://www.binance.com/api/v1"
-    FUTURE_URL = "https://fapi.binance.com/fapi/v1"
-    BASE_URL_V3 = "https://api.binance.com/api/v3"
-    PUBLIC_URL = "https://www.binance.com/exchange/public/product"
-
     __instance = None
 
-    def __init__(self):
-        pass
+    def __init__(self, apikey, secretkey):
+        self._client = Client(api_key=apikey,
+                              api_secret=secretkey,
+                              )
 
     @classmethod
-    def get_instance(cls):
+    def get_instance(cls, apikey, secretkey):
         if cls.__instance is None:
-            cls.__instance = cls()
+            cls.__instance = cls(apikey, secretkey)
 
         return cls.__instance
 
-    def ping(self):
-        path = "%s/ping" % self.BASE_URL_V3
-        return requests.get(path, timeout=180, verify=True).json()
-
-    def get_ticker_price(self, market, rotate_count=0):
-        path = "%s/ticker/price" % self.BASE_URL_V3
-        params = {"symbol": market}
-        res = self._get_no_sign(path, params)
-        if res == 443 and rotate_count < 20:  # 网络问题并且20次都访问都是443则报错停止运行
-            rotate_count += 1
-            time.sleep(20)
-            self.get_ticker_price(market, rotate_count)
-        time.sleep(2)
-        return float(res['price'])
-
-    def get_ticker_24hour(self, market):
-        path = "%s/ticker/24hr" % self.BASE_URL_V3
-        params = {"symbol": market}
-        res = self._get_no_sign(path, params)
-        return res
-
-    def get_market_data(self, symbol_id, interval, start_dt, end_dt, **kwargs):
+    def _internal_get_kline_data(self, symbol_id, marketdata_type, interval: Interval, start_dt, end_dt, **kwargs):
         """
-        获取Binance的K线数据
-        :param symbol: 交易对，如 "BTCUSDT"
-        :param interval: K线时间间隔，如 "1d" 表示每天
-        :param start_time: 开始时间戳（毫秒）
-        :param end_time: 结束时间戳（毫秒）
-        :param limit: 返回的K线数量限制
-        :return: K线数据列表
+        指数、现货行情的调用接口和返回数据不同，其他处理方式相同，封装成一个内部调用函数
+        :param symbol_id:
+        :param marketdata_type: index/spot
+        :param interval:
+        :param start_dt:
+        :param end_dt:
+        :param kwargs:
+        :return:
         """
-
-        url = "%s/klines" % self.FUTURE_URL
         # 字符串的日期转换为datetime
-        start_dt = int(pd.to_datetime(start_dt).timestamp() * 1000)
-        end_dt = int(pd.to_datetime(end_dt).timestamp() * 1000)
+        start_dt = str(int(pd.to_datetime(start_dt).timestamp() * 1000))
+        end_dt = str(int(pd.to_datetime(end_dt).timestamp() * 1000))
 
-        all_data = []
-        received_rows = 0
-        current_date = start_dt
+        if interval == Interval.MINUTE_1:
+            bar = '1m'
+        elif interval == Interval.MINUTE_5:
+            bar = '5m'
+        elif interval == Interval.MINUTE_15:
+            bar = '15m'
+        elif interval == Interval.MINUTE_30:
+            bar = '30m'
+        elif interval == Interval.HOUR:
+            bar = '1h'
+        elif interval == Interval.DAILY:
+            bar = '1d'
+        else:
+            raise Exception(f'输入参数【interval={interval}】无效或尚未支持!')
 
-        with tqdm() as pbar:
-            while current_date < end_dt:
-                params = {
-                    'symbol': symbol_id,
-                    'interval': interval,
-                    'startTime': current_date,
-                    'endTime': end_dt,
-                    'limit': 1000  # 币安允许的最大请求条数
-                }
+        if marketdata_type == 'index':
+            klines_type = HistoricalKlinesType.FUTURES_INDEX_PRICE
+        elif marketdata_type == 'spot':
+            klines_type = HistoricalKlinesType.SPOT
+        else:
+            raise Exception(f'输入参数【marketdata_type={marketdata_type}】无效或尚未支持!')
 
-                retries = 5
-                for i in range(retries):
-                    try:
-                        response = requests.get(url, params=params)
-                        break
-                    except requests.exceptions.SSLError as e:
-                        print(f"SSL error occurred: {e}. Retrying {i + 1}/{retries}...")
-                        sleep(2)
-                    except requests.exceptions.RequestException as e:
-                        print(f"Request error: {e}. Retrying {i + 1}/{retries}...")
-                        sleep(2)
+        res = self._client.get_historical_klines(symbol=symbol_id,
+                                                 interval=bar,
+                                                 start_str=start_dt,
+                                                 end_str=end_dt,
+                                                 klines_type=klines_type)
+        if res is not None and len(res) > 0:
+            kline_data = pd.DataFrame(res)
 
-                if response.status_code == 200:
-                    data = response.json()
-                    if not data:  # 如果没有更多数据，退出循环
-                        break
-
-                    df = pd.DataFrame(data)
-                    received_rows += len(df)
-
-                    all_data.append(df)
-
-                    # 更新 current_date 为最早一条数据的时间
-                    current_date = df.iloc[-1][6] + 1
-
-                    # 添加延迟以避免超过 API 速率限制
-                    time.sleep(0.1)
-                else:
-                    print("无法获取数据:", response.status_code, response.text)
-                    return None
-
-                pbar.update(received_rows)
-                pbar.set_description(
-                    f"fetching data from binance, symbol_id: {symbol_id}, received rows: {received_rows}")
-
-        if all_data:
-            final_df = pd.concat(all_data, ignore_index=True)
-            # final_df = final_df[final_df['Open Time'] <= start_dt]
-            final_df.columns = [
+            kline_data.columns = [
                 'Open Time', 'Open', 'High', 'Low', 'Close', 'Volume',
                 'Close Time', 'Quote Asset Volume', 'Number of Trades',
                 'Taker Buy Base Asset Volume', 'Taker Buy Quote Asset Volume', 'Ignore'
             ]
-            final_df['Open Time'] = pd.to_datetime(final_df['Open Time'], unit='ms')
-            final_df['Close Time'] = pd.to_datetime(final_df['Close Time'], unit='ms')
-            final_df['symbol_id'] = symbol_id
+            kline_data['Open Time'] = pd.to_datetime(kline_data['Open Time'], unit='ms')
+            kline_data['Close Time'] = pd.to_datetime(kline_data['Close Time'], unit='ms')
+            kline_data['symbol_id'] = symbol_id
 
-            final_df = final_df.rename(columns={'Open Time': 'datetime',
-                                                'Open': 'open',
-                                                'High': 'high',
-                                                'Low': 'low',
-                                                'Close': 'close',
-                                                'Quote Asset Volume': 'turnover',
-                                                'Volume': 'volume'
-                                                })
+            kline_data = kline_data.rename(columns={'Open Time': 'datetime',
+                                                    'Open': 'open',
+                                                    'High': 'high',
+                                                    'Low': 'low',
+                                                    'Close': 'close',
+                                                    'Quote Asset Volume': 'turnover',
+                                                    'Volume': 'volume'
+                                                    })
 
-            final_df = final_df[['symbol_id', 'datetime', 'open', 'high', 'low', 'close', 'turnover', 'volume']]
-            final_df[['open', 'high', 'low', 'close', 'turnover', 'volume']] = final_df[['open', 'high', 'low', 'close', 'turnover', 'volume']].astype(float)
-            return final_df.sort_values('datetime').reset_index(drop=True)
+            kline_data = kline_data[['symbol_id', 'datetime', 'open', 'high', 'low', 'close', 'turnover', 'volume']]
+            kline_data[['open', 'high', 'low', 'close', 'turnover', 'volume']] = kline_data[
+                ['open', 'high', 'low', 'close', 'turnover', 'volume']].astype(float)
+
+            return kline_data.sort_values('datetime').reset_index(drop=True)
         else:
             return None
 
 
-    def buy_limit(self, market, quantity, rate):
-        path = "%s/order" % self.BASE_URL_V3
-        params = self._order(market, quantity, "BUY", rate)
-        return self._post(path, params)
-
-    def sell_limit(self, market, quantity, rate):
-        path = "%s/order" % self.BASE_URL_V3
-        params = self._order(market, quantity, "SELL", rate)
-        return self._post(path, params)
-
-    def buy_market(self, market, quantity):
-        path = "%s/order" % self.BASE_URL_V3
-        params = self._order(market, quantity, "BUY")
-        return self._post(path, params)
-
-    def sell_market(self, market, quantity):
-        path = "%s/order" % self.BASE_URL_V3
-        params = self._order(market, quantity, "SELL")
-        return self._post(path, params)
-
-    def get_ticker_24hour(self, market):
-        path = "%s/ticker/24hr" % self.BASE_URL
-        params = {"symbol": market}
-        res = self._get_no_sign(path, params)
-        print(res)
-        return round(float(res['priceChangePercent']), 1)
-
-    def get_positionInfo(self, symbol):
-        '''当前持仓交易对信息'''
-        path = "%s/positionRisk" % self.BASE_URL
-        params = {"symbol": symbol}
-        time.sleep(1)
-        return self._get(path, params)
-
-    def get_future_positionInfo(self, symbol):
-        '''当前期货持仓交易对信息'''
-        path = "%s/fapi/v2/positionRisk" % self.FUTURE_URL
-        params = {"symbol": symbol}
-        res = self._get(path, params)
-        print(res)
-        return res
-
-    def dingding_warn(self, text):
-        headers = {'Content-Type': 'application/json;charset=utf-8'}
-        api_url = "https://oapi.dingtalk.com/robot/send?access_token=%s" % self.dingding_token
-        json_text = json_text = {
-            "msgtype": "text",
-            "at": {
-                "atMobiles": [
-                    "11111"
-                ],
-                "isAtAll": False
-            },
-            "text": {
-                "content": text
+    def _internal_extract_symbol_detail(self, exchange_info):
+        symbols = []
+        for symbol_info in exchange_info['symbols']:
+            symbol = {
+                'symbol': symbol_info['symbol'],
+                'status': symbol_info['status'],
+                'baseAsset': symbol_info['baseAsset'],
+                'quoteAsset': symbol_info['quoteAsset'],
+                'quotePrecision': symbol_info['quotePrecision'],
+                'filters': {}
             }
-        }
-        requests.post(api_url, json.dumps(json_text), headers=headers).content
 
-    def get_cointype(self):
-        '''读取json文件'''
-        tmp_json = {}
-        with open(data_path, 'r') as f:
-            tmp_json = json.load(f)
-            f.close()
-        return tmp_json["config"]["cointype"]
+            # 提取过滤器信息
+            for filter in symbol_info['filters']:
+                if filter['filterType'] == 'PRICE_FILTER':
+                    symbol['filters']['minPrice'] = filter['minPrice']
+                    symbol['filters']['maxPrice'] = filter['maxPrice']
+                    symbol['filters']['tickSize'] = filter['tickSize']
+                elif filter['filterType'] == 'LOT_SIZE':
+                    symbol['filters']['minQty'] = filter['minQty']
+                    symbol['filters']['maxQty'] = filter['maxQty']
+                    symbol['filters']['stepSize'] = filter['stepSize']
+                elif filter['filterType'] == 'MIN_NOTIONAL':
+                    symbol['filters']['minNotional'] = filter['minNotional']
+                elif filter['filterType'] == 'PERCENT_PRICE':
+                    symbol['filters']['multiplierUp'] = filter['multiplierUp']
+                    symbol['filters']['multiplierDown'] = filter['multiplierDown']
 
-    ### ----私有函数---- ###
-    def _order(self, market, quantity, side, price=None):
-        '''
-        :param market:币种类型。如：BTCUSDT、ETHUSDT
-        :param quantity: 购买量
-        :param side: 订单方向，买还是卖
-        :param price: 价格
-        :return:
-        '''
-        params = {}
+            symbols.append(symbol)
 
-        if price is not None:
-            params["type"] = "LIMIT"
-            params["price"] = self._format(price)
-            params["timeInForce"] = "GTC"
+        return symbols
+
+    def get_instruments(self, product: Union[List[Product], Product] = None, **kwargs):
+        """
+        :param product_type:
+        :param kwargs:
+        :return: List(Instrument)
+        """
+        if product is None:
+            # product_type_list = list(ProductType)
+            product_list = [Product.SPOT]
         else:
-            params["type"] = "MARKET"
+            product_list = [product]
 
-        params["symbol"] = market
-        params["side"] = side
-        params["quantity"] = '%.8f' % quantity
+        if set(product_list).intersection({Product.OPTION,
+                                           Product.SWAP,
+                                           Product.FUTURES,
+                                           Product.MARGIN
+                                           }):
+            raise Exception('Input argument not valid! 【product】only support spot recently.')
 
-        return params
+        instrument_list = []
 
-    def _get(self, path, params={}):
-        params.update({"recvWindow": recv_window})
-        query = urlencode(self._sign(params))
-        url = "%s?%s" % (path, query)
-        header = {"X-MBX-APIKEY": self.key}
-        res = requests.get(url, headers=header, timeout=30, verify=True).json()
-        if isinstance(res, dict):
-            if 'code' in res:
-                error_info = "报警：做多网格,请求异常.错误原因{info}".format(info=str(res))
-                self.dingding_warn(error_info)
-        return res
+        for product in product_list:
+            exchange_info = self._client.get_exchange_info()
+            if exchange_info is not None:
+                symbols = self._internal_extract_symbol_detail(exchange_info=exchange_info)
+                for symbol in symbols:
+                    instrument: Instrument = Instrument(
+                        instrument_id=symbol['symbol'],
+                        instrument_name=symbol['symbol'],
+                        exchange=Exchange.BINANCE.value,
+                        instrument_type=InstrumentType.CRYPTO,
+                        product=product,
+                        list_date='',
+                        expire_date='',
+                        price_tick=float(symbol['filters'].get('tickSize', 0)),
+                        min_limit_order_volume=float(symbol['filters'].get('minQty')),
+                        max_limit_order_volume=float(symbol['filters'].get('maxQty')),
+                        min_market_order_volume=float(symbol['filters'].get('minQty')),
+                        max_market_order_volume=float(symbol['filters'].get('minQty')),
+                        status=symbol['status'],
+                    )
 
-    def _get_no_sign(self, path, params={}):
-        query = urlencode(params)
-        url = "%s?%s" % (path, query)
-        # res = requests.get(url, timeout=10, verify=True).json()
+                    instrument_list.append(instrument)
 
-        try:
-            res = requests.get(url, timeout=10, verify=True).json()
-            if isinstance(res, dict):
-                if 'code' in res:
-                    error_info = "报警：做多网格,请求异常.错误原因{info}".format(info=str(res))
-                    self.dingding_warn(error_info)
-            return res
-        except Exception as e:
-            if str(e).find("443") != -1:  # 网络错误不用报错
-                return 443
+        return instrument_list
 
-    def _sign(self, params={}):
-        data = params.copy()
+    def get_history_index_kline_data(self, symbol_id, interval: Interval, start_dt, end_dt, **kwargs):
+        """
+        获取指数的K线数据。指数是通过特定的计算方法，选取多个相关市场或交易对的数据进行综合计算得出的一个数值。
+        OKX指数行情通常会综合多个主流加密货币交易平台上 BTC 的价格信息，经过加权平均等计算方式得到一个指数价格，以反映市场的整体价格水平。
 
-        ts = int(1000 * time.time())
-        data.update({"timestamp": ts})
-        h = urlencode(data)
-        b = bytearray()
-        b.extend(self.secret.encode())
-        signature = hmac.new(b, msg=h.encode('utf-8'), digestmod=hashlib.sha256).hexdigest()
-        data.update({"signature": signature})
-        return data
+        :param symbol_id 交易对，如 "BTC-USDT"
+        :param interval: K线时间间隔，如 "1d" 表示每天
+        :param start_dt: 开始时间, 'YYYY-MM-DD' 或 'YYYY-MM-DD HH:MM:SS‘
+        :param end_dt: 结束时间
+        :return: K线数据列表
+        """
 
-    def _post(self, path, params={}):
-        params.update({"recvWindow": recv_window})
-        query = self._sign(params)
-        url = "%s" % (path)
-        header = {"X-MBX-APIKEY": self.key}
-        res = requests.post(url, headers=header, data=query, timeout=180, verify=True).json()
+        fetch_data = self._internal_get_kline_data(symbol_id=symbol_id,
+                                                   marketdata_type='index',
+                                                   interval=interval,
+                                                   start_dt=start_dt,
+                                                   end_dt=end_dt,
+                                                   **kwargs
+                                                   )
 
-        if isinstance(res, dict):
-            if 'code' in res:
-                error_info = "报警：做多网格,请求异常.错误原因{info}".format(info=str(res))
-                self.dingding_warn(error_info)
+        return fetch_data
 
-        return res
+    def get_history_kline_data(self, symbol_id, interval: Interval, start_dt, end_dt, **kwargs):
+        """
+        获取的K线数据
+        :param symbol_id 交易对，如 "BTC-USDT"
+        :param interval: K线时间间隔，如 "1d" 表示每天
+        :param start_dt: 开始时间, 'YYYY-MM-DD' 或 'YYYY-MM-DD HH:MM:SS‘
+        :param end_dt: 结束时间
+        :return: K线数据列表
+        """
+        fetch_data = self._internal_get_kline_data(symbol_id=symbol_id,
+                                                   marketdata_type='spot',
+                                                   interval=interval,
+                                                   start_dt=start_dt,
+                                                   end_dt=end_dt,
+                                                   **kwargs
+                                                   )
 
-    def _format(self, price):
-        return "{:.8f}".format(price)
+        return fetch_data
 
 
 if __name__ == "__main__":
-    instance = BinanceApiWrapper()
-    # print(instance.buy_limit("EOSUSDT",5,2))
-    # print(instance.get_ticker_price("WINGUSDT"))
-    start_dt = '2021-01-01 00:00:00'
-    end_dt = '2024-11-15 23:59:59'
-    result = instance.get_market_data("BTCUSDT", '5m', start_dt, end_dt)
+    from btc_model.setting.setting import get_settings
+
+    setting = get_settings('cex.binance')
+
+    apikey = setting['apikey']
+    secretkey = setting['secretkey']
+
+    instance = BinanceApiWrapper.get_instance(apikey, secretkey)
+
+    # instruments = instance.get_instruments(product=Product.SPOT)
+    # print(instruments)
+
+    start_dt = '2024-01-01 00:00:00'
+    end_dt = '2025-01-18 23:59:59'
+    result = instance.get_history_kline_data("BTCUSDT", Interval.DAILY, start_dt, end_dt)
+
     print(result)

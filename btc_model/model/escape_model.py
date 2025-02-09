@@ -1,12 +1,3 @@
-# -*- coding: utf-8 -*-
-"""
-Author: guozq
-
-Create Date: 2025/01/19
-
-Description:
-
-"""
 import datetime
 
 from btc_model.core.wrapper.okx_api_wrapper import OKxApiWrapper
@@ -89,14 +80,14 @@ class EscapeModel:
 
         # 准备好kline、sth_mvrv、mvrv_zscore、feargreed等数据
         # sth_mvrv、mvrv_zscore、feargreed尚无底层数据，直接从其他免费获取数据的平台网站获取最终指标
-        self.kline_data = self.OKxApi.get_kline(symbol_id='BTC-USD',
-                                                interval='1d',
-                                                start_dt=start_dt,
-                                                end_dt=end_dt
-                                                )
+        self.kline_data = self.OKxApi.get_history_kline_data(symbol_id='BTC-USD',
+                                                             interval='1d',
+                                                             start_dt=start_dt,
+                                                             end_dt=end_dt
+                                                             )
 
         self.sth_mvrv_data = self.bitcoin_data_api.get_sth_mvrv_data(start_dt=start_dt, end_dt=current_date)
-        self.mvrv_zscore_data = self.bitcoin_data_api.get_sth_mvrv_zsccore_data(start_dt=start_dt, end_dt=current_date)
+        self.mvrv_zscore_data = self.bitcoin_data_api.get_mvrv_zscore_data(start_dt=start_dt, end_dt=current_date)
         self.feargreed_data = self.alternative_api.get_feargreed_data(start_dt=start_dt, end_dt=current_date)
 
         # 使用上下文变量（context）保存kline_data、close_array; close_array定义为np.array类型，提高计算效率
@@ -108,11 +99,20 @@ class EscapeModel:
                                      long_window=self.pi_cycle_long_window
                                      )
 
-        return indicator.compute(self.context)
+        ma_short, ma_long = indicator.compute(self.context)
+
+        if ma_short[-1] > 2 * ma_long[-1]:
+            return True
+        else:
+            return False
 
     def calculate_mayer_multiple(self):
         indicator = IndicatorMayerMultiple(window=self.mayer_window)
-        return indicator.compute(self.context)
+        mayer_multiple = indicator.compute(self.context)
+        if mayer_multiple[-1] > self.mayer_threshold:
+            return True
+        else:
+            return False
 
 
     def calculate_bollinger(self):

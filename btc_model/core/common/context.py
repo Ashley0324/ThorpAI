@@ -1,12 +1,3 @@
-# -*- coding: utf-8 -*-
-"""
-Author: guozq
-
-Create Date: 2022/5/22 22:48
-
-Description:
-
-"""
 import datetime
 
 

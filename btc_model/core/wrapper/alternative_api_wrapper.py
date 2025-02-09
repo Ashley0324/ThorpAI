@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 """
 Author: guozq
 
@@ -53,7 +52,8 @@ class AlternativeApiWrapper(object):
 
         current_date = pd.Timestamp.now()
 
-        date_diff = (current_date - start_dt).days
+        # 若date_diff 等于0，接口返回历史全部日期的指标值，这样设定小值为1
+        date_diff = max((current_date - start_dt).days, 1)
 
         params = {
             'limit': date_diff,

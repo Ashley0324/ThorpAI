@@ -1,16 +1,14 @@
-# -*- coding: utf-8 -*-
-"""
-Author: guozq
-
-Create Date: 2025/01/19
-
-Description:
-
-"""
 
 from pathlib import Path
 import json
 
+from btc_model.core.common.const import (Exchange,
+                                         Interval,
+                                         InstrumentType,
+                                         Product,
+                                         EntityType,
+                                         ProviderType
+                                         )
 
 class FileUtil:
     """
@@ -64,3 +62,32 @@ class FileUtil:
                 indent=4,
                 ensure_ascii=False
             )
+
+    @staticmethod
+    def get_local_entity_root_path(output_dir: str,
+                                entity_type: EntityType,
+                                interval: Interval,
+                                exchange: Exchange,
+                                provider_type: ProviderType
+                                ):
+        if entity_type in [EntityType.INSTRUMENT]:
+            if exchange is None or exchange == Exchange.NONE:
+                raise Exception('Invalid argument, exchange must not be empty or none!')
+            root_path = f"{output_dir}/{entity_type.value.lower()}/{exchange.value.lower()}"
+        elif entity_type in [EntityType.KLINE, entity_type.KLINE_INDEX]:
+            if exchange is None or exchange == Exchange.NONE:
+                raise Exception('Invalid argument, exchange must not be empty or none!')
+
+            if interval is None or interval == Interval.NONE:
+                raise Exception('Invalid argument, interval must not be empty or none!')
+
+            root_path = f"{output_dir}/{entity_type.value.lower()}/{exchange.value.lower()}/{interval.value.lower()}"
+        elif entity_type in [EntityType.INDICATOR]:
+            if interval is None:
+                raise Exception('Invalid argument, interval must not be empty or none!')
+
+            root_path = f"{output_dir}/{entity_type.value.lower()}/{provider_type.value.lower()}/{interval.value.lower()}"
+        else:
+            root_path = f"{output_dir}/{entity_type.value.lower()}/{provider_type.value.lower()}"
+
+        return root_path

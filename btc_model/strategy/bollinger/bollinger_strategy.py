@@ -1,13 +1,3 @@
-# -*- coding: UTF-8 –*-
-
-"""
-Author: guozq
-
-Create Date: 2025/01/22
-
-Description:
-
-"""
 import platform
 import pandas as pd
 import numpy as np
@@ -20,20 +10,14 @@ import pytz
 import empyrical
 from empyrical import sharpe_ratio
 
-
+from btc_model.core.util.file_cache_util import FileCacheUtil
 
 operating_system = platform.system()
 
 if operating_system == "Windows":
-    BTC_15_MIN_DATA_PATH = 'D:/source/Data/BTC/BTC_15m.csv'
-    BTC_30_MIN_DATA_PATH = 'D:/source/Data/BTC/BTC_30m.csv'
-    BTC_1_DAY_DATA_PATH = 'D:/source/Data/BTC/BTC_1d.csv'
+    BTC_1_MIN_DATA_PATH = 'D:/source/Data/加密货币/1分钟k线/1M-Binance_BTCUSDT_data.csv'
 else:
-    BTC_15_MIN_DATA_PATH = '/Users/Jason/work/03 - data/BTC/BTC_15m.csv'
-    BTC_30_MIN_DATA_PATH = '/Users/Jason/work/03 - data/BTC/BTC_30m.csv'
-    BTC_1_DAY_DATA_PATH = '/Users/Jason/work/03 - data/BTC/BTC_1d.csv'
-
-
+    BTC_1_MIN_DATA_PATH = '/Users/Jason/work/03 - data/加密货币/1分钟k线/1M-Binance_BTCUSDT_data.csv'
 
 # 恒生指数期货合约乘数
 VOLUME_MULTIPLE = 1
@@ -72,10 +56,18 @@ class BollingerStrategy(bt.Strategy):
         ('bollinger_15m_stop_profit_std_n', 8),
         ('atr_15m_period', 300),
 
-
         ('bollinger_30m_period', 20),
         ('bollinger_30m_stddev_multiple', 2),
+        ('bollinger_30m_stop_profit_std_n', 8),
         ('atr_30m_period', 15),
+
+
+        ('bollinger_60m_period', 300),
+        ('bollinger_60m_stddev_multiple', 1.5),
+        ('bollinger_60m_stop_profit_std_n', 8),
+        ('atr_60m_period', 300),
+
+        ('printlog', True),
     )
 
     def __init__(self):
@@ -94,123 +86,156 @@ class BollingerStrategy(bt.Strategy):
         self.daily_values = {}
         self.previous_date = None
 
-        self.data_15m = self.getdatabyname('15m')
-        # self.data_30m = self.getdatabyname('30m')
+        self.data_1m = self.getdatabyname('data_1m')
+        self.data_15m = self.getdatabyname('data_15m')
+        self.data_30m = self.getdatabyname('data_30m')
+        self.data_60m = self.getdatabyname('data_60m')
 
         self.atr_15m = bt.indicators.AverageTrueRange(self.data_15m, period=self.params.atr_15m_period)
+        self.atr_30m = bt.indicators.AverageTrueRange(self.data_30m, period=self.params.atr_30m_period)
+        self.atr_60m = bt.indicators.AverageTrueRange(self.data_60m, period=self.params.atr_60m_period)
 
-        # self.close_price_15m = self.data_15m.close
         self.bollinger_15m = bt.indicators.BollingerBands(self.data_15m.close,
                                                           period=self.params.bollinger_15m_period,
                                                           devfactor=self.params.bollinger_15m_stddev_multiple
+                                                          )
+        self.bollinger_30m = bt.indicators.BollingerBands(self.data_30m.close,
+                                                          period=self.params.bollinger_30m_period,
+                                                          devfactor=self.params.bollinger_30m_stddev_multiple
+                                                          )
+        self.bollinger_60m = bt.indicators.BollingerBands(self.data_60m.close,
+                                                          period=self.params.bollinger_60m_period,
+                                                          devfactor=self.params.bollinger_60m_stddev_multiple
                                                           )
 
         self.middle_band_15m = self.bollinger_15m.mid
         self.upper_band_15m = self.bollinger_15m.top
         self.lower_band_15m = self.bollinger_15m.bot
 
-        # 添加 SAR 指标
-        # self.sar = bt.indicators.ParabolicSAR(self.data)
+        self.middle_band_30m = self.bollinger_30m.mid
+        self.upper_band_30m = self.bollinger_30m.top
+        self.lower_band_30m = self.bollinger_30m.bot
 
-    def trade_by_bollinger(self):
-        dt_15m = self.data_15m.datetime.datetime(0).strftime("%Y-%m-%d %H:%M:%S")
+        self.middle_band_60m = self.bollinger_60m.mid
+        self.upper_band_60m = self.bollinger_60m.top
+        self.lower_band_60m = self.bollinger_60m.bot
+
+    def trade_by_bollinger(self, params):
+        data = params['data']
+        upper_band = params['upper_band']
+        middle_band = params['middle_band']
+        lower_band = params['lower_band']
+        atr = params['atr']
+        stop_profit_std_n = params['stop_profit_std_n']
+
+        if self.data_1m.datetime.datetime(0) != data.datetime.datetime(0):
+            return
+
+        # print(data.datetime.datetime(0).strftime("%Y-%m-%d %H:%M:%S"))
 
         if self.order:
             return
 
-
         # need at least two bollinger records
-        if np.count_nonzero(~np.isnan(self.middle_band_15m.get(0, len(self.middle_band_15m)))) == 1:
+        if np.count_nonzero(~np.isnan(middle_band.get(0, len(middle_band)))) == 1:
             return
 
         if self.position.size == 0 and \
-                self.data_15m.close[0] > self.upper_band_15m[0] and \
-                self.data_15m.close[-1] < self.upper_band_15m[-1]:
-
+                data.close[0] > upper_band[0] and \
+                data.close[-1] < upper_band[-1]:
 
             # 杠杠率/仓位比例调整
             # 参照海龟资金管理，1单位ATR的波动对应策略整体资金规模的0.5%
-            atr_value = self.atr_15m[0]
-            price = self.data_15m.close[0]
+            atr_value = atr[0]
+            price = data.close[0]
             leverage = 0.005 / atr_value * price if atr_value != 0 else 0
 
             # 最大4倍杠杆，超过截断
             if leverage > 4:
                 leverage = 4
 
-            self.target_price = self.middle_band_15m[0] * self.params.bollinger_15m_stop_profit_std_n
+            self.target_price = middle_band[0] * stop_profit_std_n
 
             order_size = self.broker.get_cash() / (price * VOLUME_MULTIPLE) * leverage
 
             self.order = self.buy(size=order_size)
             self.log('INSERT BUY OPEN ORDER, Pre-Price: %.2f, Price: %.2f, Pre-UB: %.2f, UB: %.2f, Size: %.2f' %
-                     (self.data_15m.close[-1],
-                      self.data_15m.close[0],
-                      self.upper_band_15m[-1],
-                      self.upper_band_15m[0],
+                     (data.close[-1],
+                      data.close[0],
+                      upper_band[-1],
+                      upper_band[0],
                       self.getsizing(isbuy=True)))
 
-        elif self.position.size > 0 and (self.data_15m.close[0] < self.middle_band_15m[0] or self.data_15m.close[0] > self.target_price):
+        elif self.position.size > 0 and (
+                data.close[0] < middle_band[0] or data.close[0] > self.target_price):
             # close long position
             # 收盘价向下穿过布林带中轨
-            # pdb.set_trace()
 
             self.order = self.close()
             self.log('INSERT SELL CLOSE ORDER, Pre-Price: %.2f, Price: %.2f, Pre-MB: %.2f, MB: %.2f, Size: %.2f' %
-                     (self.data_15m.close[-1],
-                      self.data_15m.close[0],
-                      self.middle_band_15m[-1],
-                      self.middle_band_15m[0],
+                     (data.close[-1],
+                      data.close[0],
+                      middle_band[-1],
+                      middle_band[0],
                       self.getsizing(isbuy=False)))
 
         elif self.position.size == 0 and \
-                self.data_15m.close[0] < self.lower_band_15m[0] and \
-                self.data_15m.close[-1] > self.lower_band_15m[-1]:
+                data.close[0] < lower_band[0] and \
+                data.close[-1] > lower_band[-1]:
 
             # 杠杠率/仓位比例调整
             # 参照海龟资金管理，1单位ATR的波动对应策略整体资金规模的0.5%
-            atr_value = self.atr_15m[0]
-            price = self.data_15m.close[0]
+            atr_value = atr[0]
+            price = data.close[0]
             leverage = 0.005 / atr_value * price if atr_value != 0 else 0
 
             # 最大4倍杠杆，超过截断
             if leverage > 4:
                 leverage = 4
 
-            self.target_price = self.middle_band_15m[0] * self.params.bollinger_15m_stop_profit_std_n
+            self.target_price = middle_band[0] * stop_profit_std_n
 
             order_size = self.broker.get_cash() / (price * VOLUME_MULTIPLE) * leverage
 
             self.order = self.sell(size=order_size)
             self.log('INSERT SELL OPEN ORDER, Pre-Price: %.2f, Price: %.2f, Pre-LB: %.2f, LB: %.2f, Size: %.2f' %
-                     (self.data_15m.close[-1],
-                      self.data_15m.close[0],
-                      self.lower_band_15m[-1],
-                      self.lower_band_15m[0],
+                     (data.close[-1],
+                      data.close[0],
+                      lower_band[-1],
+                      lower_band[0],
                       self.getsizing(isbuy=False)))
 
-
-        elif self.position.size < 0 and (self.data_15m.close[0] > self.middle_band_15m[0] or self.data_15m.close[0] < self.target_price):
+        elif self.position.size < 0 and (
+                data.close[0] > middle_band[0] or data.close[0] < self.target_price):
             # close short position
             # 收盘价向上穿过布林带中轨
             # pdb.set_trace()
             self.order = self.close()
             self.log('INSERT BUY CLOSE ORDER, Pre-Price: %.2f, Price: %.2f, Pre-MB: %.2f, MB: %.2f, Size: %.2f' %
-                     (self.data_15m.close[-1],
-                      self.data_15m.close[0],
-                      self.middle_band_15m[-1],
-                      self.middle_band_15m[0],
+                     (data.close[-1],
+                      data.close[0],
+                      middle_band[-1],
+                      middle_band[0],
                       self.getsizing(isbuy=True)))
 
     def next(self):
+        params = {
+            'data': self.data_60m,
+            'upper_band': self.upper_band_60m,
+            'middle_band': self.middle_band_60m,
+            'lower_band': self.lower_band_60m,
+            'atr': self.atr_60m,
+            'stop_profit_std_n': self.params.bollinger_60m_stop_profit_std_n,
+        }
         current_date = self.data_15m.datetime.datetime(0).strftime("%Y-%m-%d")
         if self.previous_date is None or self.previous_date != current_date:
             self.previous_date = current_date
             current_value = self.broker.get_value()
             self.daily_values[current_date] = current_value
 
+            print(f'{current_date}, current value={current_value}')
 
-        self.trade_by_bollinger()
+        self.trade_by_bollinger(params)
 
     def log(self, txt, dt=None, doprint=False):
         if self.params.printlog or doprint:
@@ -271,6 +296,7 @@ class BollingerStrategy(bt.Strategy):
 
         self.order = None
 
+
 def show_result_empyrical(returns, risk_free=0.00):
     print('\n\n<----Emprical策略评价---->')
     # 总收益率
@@ -292,14 +318,25 @@ def show_result_empyrical(returns, risk_free=0.00):
 
 
 if __name__ == '__main__':
-    data_15m = pd.read_csv(BTC_15_MIN_DATA_PATH, index_col=0)
-    data_15m = data_15m.rename(columns={'code': 'instrument_id', 'time_key': 'datetime'})
-    data_15m = data_15m[(data_15m['datetime'] >= '2024-10-25') & (data_15m['datetime'] <= '2024-12-31')]
-    data_15m['datetime'] = pd.to_datetime(data_15m['datetime'])
-    data_15m = data_15m[['datetime', 'open', 'close', 'high', 'low', 'volume', 'turnover']]
+    start_dt = '2023-01-01'
+    end_dt = '2023-12-31'
 
-    data_15m = PandasDataFeed(dataname=data_15m)
+    cached_data, cache_file_path, cache_file_desc = (
+        FileCacheUtil.load_cached_data(params=[start_dt, end_dt, BTC_1_MIN_DATA_PATH]))
+    if cached_data is not None:
+        data_1m = cached_data['data_1m']
+    else:
+        data_1m = pd.read_csv(BTC_1_MIN_DATA_PATH, index_col=-1)
+        data_1m = data_1m.rename(columns={'open_time': 'datetime'})
+        data_1m = data_1m[(data_1m['datetime'] >= start_dt) & (data_1m['datetime'] <= end_dt)]
+        data_1m['datetime'] = pd.to_datetime(data_1m['datetime'])
+        data_1m = data_1m[['datetime', 'open', 'close', 'high', 'low', 'volume']]
+        data_1m = data_1m.reset_index(drop=True)
 
+        FileCacheUtil.save_cached_data(file_path=cache_file_path, file_desc=cache_file_desc,
+                                       object_to_save={'data_1m': data_1m})
+
+    data_1m = PandasDataFeed(dataname=data_1m)
 
     cerebro = bt.Cerebro()
     start_cash = 10000000
@@ -310,9 +347,13 @@ if __name__ == '__main__':
     cerebro.broker.setcommission(commission=0.0001, leverage=10.0, margin=0.1)
     cerebro.addanalyzer(bt.analyzers.PyFolio, _name="PyFolio")
 
-    cerebro.adddata(data_15m, name='15m')
+    cerebro.adddata(data_1m, name='data_1m')
+    # 重采样
+    cerebro.resampledata(data_1m, name="data_15m", timeframe=bt.TimeFrame.Minutes, compression=15)
+    cerebro.resampledata(data_1m, name="data_30m", timeframe=bt.TimeFrame.Minutes, compression=30)
+    cerebro.resampledata(data_1m, name="data_60m", timeframe=bt.TimeFrame.Minutes, compression=60)
+
     cerebro.addstrategy(BollingerStrategy)
-    # 不要调用cerebro.run() 策略执行交给run_and_show_performance函数负责
     results = cerebro.run()
 
     # 获取回测结束后的总资金

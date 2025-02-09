@@ -1,18 +1,8 @@
-# -*- coding: utf-8 -*-
-"""
-Author: guozq
-
-Create Date: 2022/5/22 17:39
-
-Description:
-
-"""
 import os
 from logging import CRITICAL
 from typing import Dict, Any
 from tzlocal import get_localzone
 from btc_model.core.util.file_util import FileUtil
-
 
 SETTINGS: Dict[str, Any] = {
     # 配置request url需要的proxies，如果网络环境无需代理，注释即可
@@ -44,6 +34,9 @@ SETTINGS: Dict[str, Any] = {
     # "cex.okx.proxy": "http://127.0.0.1:52469",
     "cex.okx.proxy": None,
 
+    "cex.binance.apikey": "3JIn0k7ZcTdR6bvPmWzf4Ha294rJqWvN2h69wyRc7ETbVKIiot8GOqEC6vjJYOuC",
+    "cex.binance.secretkey": "FkeW6gIYUAjrIhFRT7RFsT5950WsudstML8aoOFQqwLLoy3ukCIM9LRrXsRwk9WO",
+
     # ------------------------------------------------------
     # 设置逃顶模型各指标的参数
     # ------------------------------------------------------
@@ -71,6 +64,13 @@ SETTINGS: Dict[str, Any] = {
     "escape_model.indicator.bollinger.window": 100,
     "escape_model.indicator.bollinger.nbdev": 2.5,
     # ------------------------------------------------------
+
+    # ------------------------------------------------------
+    # update_manager的参数
+    # ------------------------------------------------------
+    "update_manager.indicator.use_exchange": 'OKX',
+    "update_manager.indicator.symbols": ['BTC-USDT', 'ETH-USDT', 'SOL-USDT', 'SOL-USDT'],
+
 
     "database.uri": "",
     "database.name": "",

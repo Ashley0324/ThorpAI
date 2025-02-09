@@ -1,15 +1,6 @@
-# -*- coding: utf-8 -*-
 """
-Author: guozq
-
-Create Date: 2025-01-19
-
-Description:
-    Wrapper for fetching data of indicators provided by BGeometrics (www.bitcoin-data.com).
-    These indicators are freely available from BGeometrics but cannot be obtained for free through exchange APIs.
-
-History:
-    2025-01-19: initial version.
+Wrapper for fetching data of indicators provided by BGeometrics (www.bitcoin-data.com).
+These indicators are freely available from BGeometrics but cannot be obtained for free through exchange APIs.
 """
 
 import pandas as pd
@@ -19,7 +10,6 @@ import requests
 class BitcoinDataApiWrapper(object):
     BASE_URL = "https://bitcoin-data.com"
     BASE_URL_V1 = BASE_URL + "/v1"
-    STH_MVRV_URL = BASE_URL_V1 + '/sth_mvrv'
 
 
     __instance = None
@@ -61,7 +51,7 @@ class BitcoinDataApiWrapper(object):
 
         return data
 
-    def get_sth_mvrv_zsccore_data(self, start_dt, end_dt):
+    def get_mvrv_zscore_data(self, start_dt, end_dt):
         params = {
             'startday': start_dt,
             'endday': end_dt
