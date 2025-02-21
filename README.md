@@ -56,15 +56,15 @@ Thorp AI Agent is built with a modular architecture to ensure scalability and ma
 ## Strategy and index
 - [x] Pi Cycle
 - [x] S2F
-- [ ] MVRV z-score
-- [ ] Mayer Multiple
-- [ ] Fear & greed index
+- [x] MVRV z-score
+- [x] Mayer Multiple
+- [x] Fear & greed index
    
-- [ ] RSI
-- [ ] Hash Bonding
-- [ ] MACD
-- [ ] STH MVRV
-- [ ] Bollinger Band
+- [x] RSI
+- [x] Hash Bonding
+- [x] MACD
+- [x] STH MVRV
+- [x] Bollinger Band
 
 ## Quick Start
 
